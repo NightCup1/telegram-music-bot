@@ -2,11 +2,24 @@ import asyncio
 import os
 from aiogram import Bot, Dispatcher, types
 import yt_dlp
+import logging
+from dotenv import load_dotenv
 
-API_TOKEN = os.getenv("BOT_TOKEN")  # Безпечне зчитування з середовища
+# Загрузка переменных из .env файла
+load_dotenv()
 
+# Чтение токена
+API_TOKEN = os.getenv("BOT_TOKEN")
+if not API_TOKEN:
+    logging.error("BOT_TOKEN не найден в переменных окружения!")
+    exit(1)
+
+# Инициализация бота и диспетчера
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
+
+# Регистрация бота с диспетчером
+dp["bot"] = bot  # Привязка бота к контексту (альтернатива)
 
 @dp.message_handler()
 async def download_music(message: types.Message):
@@ -31,15 +44,22 @@ async def download_music(message: types.Message):
             file_name = ydl.prepare_filename(info).replace(".webm", ".mp3").replace(".m4a", ".mp3")
 
         with open(file_name, "rb") as audio:
-            await message.reply_audio(audio, title=info.get('title'))
+            await message.reply_audio(audio, title=info.get('title', "Audio"))
 
-        os.remove(file_name)
+        try:
+            os.remove(file_name)
+        except Exception as e:
+            logging.warning(f"Не удалось удалить файл {file_name}: {e}")
 
     except Exception as e:
         await message.reply(f"❌ Ошибка: {e}")
+        logging.error(f"Ошибка при обработке запроса: {e}")
 
 async def main():
-    await dp.start_polling()
+    logging.info("Бот запущен, начинаю polling...")
+    await dp.start_polling(bot)
 
 if __name__ == '__main__':
     asyncio.run(main())
+
+
