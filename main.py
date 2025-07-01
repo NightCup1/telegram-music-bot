@@ -1,9 +1,9 @@
 import asyncio
+import os
 from aiogram import Bot, Dispatcher, types
 import yt_dlp
-import os
 
-API_TOKEN = "7859831857:AAErQpVltZWQ5k9dUEAeugsTm9OjDq645rQ"
+API_TOKEN = os.getenv("BOT_TOKEN")  # Безпечне зчитування з середовища
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
