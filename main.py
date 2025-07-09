@@ -1,65 +1,127 @@
-import asyncio
 import os
-from aiogram import Bot, Dispatcher, types
+import re
+import requests
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import yt_dlp
-import logging
-from dotenv import load_dotenv
 
-# Загрузка переменных из .env файла
-load_dotenv()
+# Получаем токен из переменной окружения
+TOKEN = os.getenv("TOKEN")
 
-# Чтение токена
-API_TOKEN = os.getenv("BOT_TOKEN")
-if not API_TOKEN:
-    logging.error("BOT_TOKEN не найден в переменных окружения!")
-    exit(1)
+# Функция для очистки имени файла
+def sanitize_filename(filename):
+    return re.sub(r'[<>:"/\\|?*]', '_', filename)
 
-# Инициализация бота и диспетчера
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+# Функция для скачивания обложки
+def download_thumbnail(url, filename):
+    response = requests.get(url)
+    with open(filename, 'wb') as f:
+        f.write(response.content)
+    return filename
 
-# Регистрация бота с диспетчером
-dp["bot"] = bot  # Привязка бота к контексту (альтернатива)
+# Команда /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Напиши название песни, я найду варианты, и ты выберешь, что скачать.")
 
-@dp.message_handler()
-async def download_music(message: types.Message):
-    query = message.text
-    await message.reply("🔍 Ищу и скачиваю музыку...")
+# Обработка текстового запроса для поиска
+async def search_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text
+    await update.message.reply_text(f"Ищу: {query}...")
 
+    # Настройки yt-dlp для поиска
     ydl_opts = {
         'format': 'bestaudio/best',
         'noplaylist': True,
         'quiet': True,
-        'outtmpl': 'downloaded.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0',
+        'extract_flat': True,
+        'default_search': 'ytsearch5',
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(query, download=True)
-            file_name = ydl.prepare_filename(info).replace(".webm", ".mp3").replace(".m4a", ".mp3")
+            result = ydl.extract_info(query, download=False)
+            entries = result['entries']
 
-        with open(file_name, "rb") as audio:
-            await message.reply_audio(audio, title=info.get('title', "Audio"))
+        if not entries:
+            await update.message.reply_text("Ничего не найдено.")
+            return
 
-        try:
-            os.remove(file_name)
-        except Exception as e:
-            logging.warning(f"Не удалось удалить файл {file_name}: {e}")
+        context.user_data['search_results'] = entries
+        song_list = "\n".join(f"{i+1}. {entry['title']}" for i, entry in enumerate(entries))
+        await update.message.reply_text(f"Выберите песню (введите номер):\n{song_list}")
 
     except Exception as e:
-        await message.reply(f"❌ Ошибка: {e}")
-        logging.error(f"Ошибка при обработке запроса: {e}")
+        await update.message.reply_text(f"Ошибка поиска: {str(e)}")
 
-async def main():
-    logging.info("Бот запущен, начинаю polling...")
-    await dp.start_polling(bot)
+# Обработка выбора песни
+async def download_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get('search_results'):
+        await update.message.reply_text("Сначала выполните поиск, отправив название песни.")
+        return
+
+    try:
+        choice = int(update.message.text) - 1
+        entries = context.user_data['search_results']
+
+        if choice < 0 or choice >= len(entries):
+            await update.message.reply_text("Неверный номер. Выберите номер из списка.")
+            return
+
+        selected = entries[choice]
+        video_url = f"https://www.youtube.com/watch?v={selected['id']}"
+        await update.message.reply_text(f"Обрабатываю: {selected['title']}...")
+
+        # Настройки yt-dlp для скачивания
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': '%(title)s.%(ext)s',
+            'noplaylist': True,
+            'quiet': True,
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            result = ydl.extract_info(video_url, download=True)
+            video_title = result['title']
+            file_ext = result['ext']
+            clean_title = sanitize_filename(video_title)
+            file_name = f"{clean_title}.{file_ext}"
+            thumbnail_url = result.get('thumbnail', '')
+
+        # Скачиваем обложку
+        thumbnail_file = f"{clean_title}_thumb.jpg"
+        if thumbnail_url:
+            download_thumbnail(thumbnail_url, thumbnail_file)
+
+        # Отправляем название, обложку и аудио
+        await update.message.reply_text(f"Песня: {video_title}")
+        if os.path.exists(thumbnail_file):
+            with open(thumbnail_file, 'rb') as thumb:
+                await update.message.reply_photo(photo=thumb)
+            os.remove(thumbnail_file)
+
+        with open(file_name, 'rb') as audio:
+            await update.message.reply_audio(audio=audio)
+
+        os.remove(file_name)
+        context.user_data['search_results'] = None
+
+    except ValueError:
+        await update.message.reply_text("Введите число (номер песни).")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка скачивания: {str(e)}")
+
+def main():
+    if not TOKEN:
+        raise ValueError("Токен не задан в переменной окружения TOKEN")
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.Regex(r'^\d+$'), search_music))
+    app.add_handler(MessageHandler(filters.Regex(r'^\d+$'), download_choice))
+
+    app.run_polling()
 
 if __name__ == '__main__':
-    asyncio.run(main())
-
-
+    main()
