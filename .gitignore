@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.webm
+*.m4a
+*.opus
+*.jpg
+*.env
