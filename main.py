@@ -1,3 +1,4 @@
+ 
 import os
 import re
 import requests
@@ -39,31 +40,53 @@ async def search_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     try:
-        # Поиск и скачивание
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(f"ytsearch:{query}", download=True)
-            video_title = result['entries'][0]['title']
-            file_ext = result['entries'][0]['ext']
-            clean_title = sanitize_filename(video_title)
-            file_name = f"{clean_title}.{file_ext}"
-            thumbnail_url = result['entries'][0].get('thumbnail', '')
+            # Поиск нескольких результатов
+            result = ydl.extract_info(f"ytsearch3:{query}", download=False)
+            entries = result.get('entries', [])
 
-        # Скачиваем обложку
-        thumbnail_file = f"{clean_title}_thumb.jpg"
-        if thumbnail_url:
-            download_thumbnail(thumbnail_url, thumbnail_file)
+        if not entries:
+            await update.message.reply_text("Ничего не найдено. Попробуйте другой запрос.")
+            return
 
-        # Отправляем название, обложку и аудио
-        await update.message.reply_text(f"Песня: {video_title}")
-        if os.path.exists(thumbnail_file):
-            with open(thumbnail_file, 'rb') as thumb:
-                await update.message.reply_photo(photo=thumb)
-            os.remove(thumbnail_file)
+        # Пробуем скачать первое доступное видео
+        for entry in entries:
+            try:
+                video_title = entry['title']
+                video_id = entry['id']
+                video_url = f"https://www.youtube.com/watch?v={video_id}"
+                
+                # Скачиваем
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    result = ydl.extract_info(video_url, download=True)
+                    clean_title = sanitize_filename(video_title)
+                    file_ext = result['ext']
+                    file_name = f"{clean_title}.{file_ext}"
+                    thumbnail_url = result.get('thumbnail', '')
 
-        with open(file_name, 'rb') as audio:
-            await update.message.reply_audio(audio=audio)
+                # Скачиваем обложку
+                thumbnail_file = f"{clean_title}_thumb.jpg"
+                if thumbnail_url:
+                    download_thumbnail(thumbnail_url, thumbnail_file)
 
-        os.remove(file_name)
+                # Отправляем название, обложку и аудио
+                await update.message.reply_text(f"Песня: {video_title}")
+                if os.path.exists(thumbnail_file):
+                    with open(thumbnail_file, 'rb') as thumb:
+                        await update.message.reply_photo(photo=thumb)
+                    os.remove(thumbnail_file)
+
+                with open(file_name, 'rb') as audio:
+                    await update.message.reply_audio(audio=audio)
+
+                os.remove(file_name)
+                return  # Успешно, выходим
+
+            except Exception as e:
+                # Пропускаем недоступное видео
+                continue
+
+        await update.message.reply_text("Все найденные видео недоступны. Попробуйте другой запрос.")
 
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}")
