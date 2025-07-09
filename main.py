@@ -1,4 +1,3 @@
- 
 import os
 import re
 import requests
@@ -36,12 +35,12 @@ async def search_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'noplaylist': True,
         'quiet': True,
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0',
-        'cookies': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+        'geo_bypass': True,  # Обход гео-ограничений
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Поиск нескольких результатов
+            # Поиск трёх результатов
             result = ydl.extract_info(f"ytsearch3:{query}", download=False)
             entries = result.get('entries', [])
 
@@ -55,7 +54,7 @@ async def search_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 video_title = entry['title']
                 video_id = entry['id']
                 video_url = f"https://www.youtube.com/watch?v={video_id}"
-                
+
                 # Скачиваем
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     result = ydl.extract_info(video_url, download=True)
